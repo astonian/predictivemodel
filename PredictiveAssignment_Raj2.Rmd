@@ -1,0 +1,117 @@
+---
+title: "Excercise Quality Prediction Model"
+author: "K Chandrasekaran(Raj)"
+date: "January 22, 2016"
+output: pdf_document
+---
+**Introduction**
+In this report, we will examine data set obtained from <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>. This data set have classe response variable that indicate how well excercise is performed. This is Multilevel classification to be predicted with predictors. We will explore the data set, prepare the data set to drop predictors with no value or variances.Next we will examine remaining predictors to see which are the interested ones. This feature selection may need pre-processing. We will select models, tune paramters & compare the models to conclude. 
+
+**Exploring Data Set**
+After loading data set, we can see there are 160 variables & 19622 rows. 
+We can see first few are user names & time stamps that may not be needed for prediction of classe response variable. Removing any predictor with NA, we reduced number of predictors. Using nearZeroVar from caret package we can remove those predictors which may not be needed. This reduces the predictors to 53 variable including the response variable.Below set of R code does this clearing.
+
+```{r,results='hide'}
+suppressWarnings(library(caret))
+df <- read.csv("F:/Raj/DataScienceTools/Assignment/MachineLearn/pml-training.csv")
+# Remove user name & time predictors 
+df <- df[,-(1:7)]
+navar <- sapply(df,anyNA)
+navar <- as.data.frame(navar)
+navar <- subset.data.frame(navar, navar == "FALSE")
+navar <- row.names(navar)
+df <- subset(df, select = navar)
+# Check for any near Zero variances 
+nz <- nearZeroVar(df, saveMetrics = TRUE)
+nz <- subset.data.frame(nz, nz$zeroVar == "FALSE" & nz$nzv == "FALSE")
+nz <- row.names(nz)
+df <- subset(df, select = nz)
+# Create train and test data
+set.seed(1976)
+trainIndex <- createDataPartition(df$classe, p=0.7,list = FALSE)
+traindata <- df[trainIndex,]
+testdata <- df[-trainIndex,]
+```
+
+**Feature Selection**
+52 predictors are still huge to build model. We will need to reduce this. Let us check out which of these variables have high correlation. Those highly correlated variable is what we may need to build our models on.
+
+```{r, echo=TRUE, results='hide'}
+# Determine Highly Correlated predictors.
+hc <- cor(traindata[,-53])
+hc <- findCorrelation(hc, cutoff = 0.85, names = TRUE)
+hc <- c(hc,"classe")
+```
+High Correlation variable that have atleast 85% correlation seems to be 10 excluding response variable classe. That is significant dimension reduction. 
+
+Response variables are distinguished as below.
+exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Let us see whether 10 is enough to predict with predict tree. compare it with predicting with all 52 variables.
+
+```{r, echo=TRUE}
+suppressWarnings(library(rattle))
+# Select 85% Correlated variables from training data set/ 
+tdata <- subset(traindata, select = hc)
+#Build rpart model using only 85% correlated predictors & all predictors
+modelrpart <- train(classe ~., data=tdata, method="rpart",preProcess=c("center", "scale"))
+modelrpartall <- train(classe ~., data=traindata, method="rpart", preProcess=c("center", "scale"))
+# Plot the tree using the model
+par(mfrow=c(1,2))
+fancyRpartPlot(modelrpart$finalModel)
+fancyRpartPlot(modelrpartall$finalModel)
+```
+Above tree clearly says 10 variables are not enough. Even when using all variables, we cannot see predicting all the classes with this model. We can see the logic to this as why would highly correlated variable have some sort of connection with response variable. rpart model shows important variables are just 14 as given below
+```{r, echo=TRUE}
+par(mfrow=c(1,1))
+# Important predictors using rpart model.
+varImp(modelrpartall)
+```
+
+**Model Building**
+Using one of the boosting method that uses trees like gbm constructed model.
+modelgbm <- train(classe ~., data=traindata, method="gbm")
+```{r, echo=TRUE, results='hide'}
+#Build model using gbm method
+modelgbm <- train(classe ~., data=traindata, method="gbm", verbose=FALSE)
+```
+The final values used for the model were n.trees = 150, interaction.depth =
+ 3, shrinkage = 0.1 and n.minobsinnode = 10.
+ 
+```{r, echo=TRUE}
+#print important variables
+varImp(modelgbm)
+```
+**Evaluating Model**
+We have constructed 2 models using rpart & gbm methods. Let us compare the accuracy of these models on test data.
+```{r, echo=TRUE}
+#Predict Classe for test dataset using the model objects
+predictgbmt <- predict(modelgbm, testdata[,-53])
+predictrpart <- predict(modelrpartall, testdata[,-53])
+# Print out accuracy & other model measurements
+confusionMatrix(testdata[,53], predictgbmt)
+confusionMatrix(testdata[,53], predictrpart)
+```
+
+**Selecting Model**
+Clearly rpart model accuracy results are pathetic. Good thing we did not build gbm method model using important variable derived from rpart method. rpart model miserably fails to detect classD. gbm method model has done well here with much higher accuracy rate. Below plot compares the predicted classe from rpart & gbm model versus real data in test data set.
+```{r, echo=FALSE}
+plot(testdata[,53], predictrpart, col=unique(testdata[,53]), main="Predicted vs Real Value using Rpart Model", xlab="Real value of Classe from test dataset", ylab="Predicted value of Classe")
+```
+
+```{r, echo=FALSE}
+plot(testdata[,53], predictgbmt, col=unique(testdata[,53]), main="Predicted vs Real Value using gbm Model", xlab="Real value of Classe from test dataset", ylab="Predicted value of Classe")
+```
+**Conclusion**
+Let us apply the gbm model to provided new test data that has 20 rows & predict which classe they belong to.
+```{r, echo=TRUE}
+#Read the new data set
+tdf <- read.csv("F:/Raj/DataScienceTools/Assignment/MachineLearn/pml-testing.csv")
+# Predict the classe variable for new data set using gbm method object
+predictgbmt2 <- predict(modelgbm, tdf)
+#print out the predicted results.
+table(predictgbmt2)
+predictgbmt2
+```
+
+
